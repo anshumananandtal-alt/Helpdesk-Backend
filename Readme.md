@@ -153,7 +153,7 @@ The dashboard response contains `ticketCountPerStatus`, `averageResolutionHours`
 - Ticket image uploads require valid AWS S3 configuration. Images are stored under the `images/` key prefix.
 - The rate limiter is applied globally and allows up to 100 requests per IP per 15-minute window.
 - Legacy user auth (`/api/users/signup`, `/api/users/login`), ticket `PUT`, and comment routes remain available for compatibility.
-- `npm test` runs the built-in Node.js tests for role-based ticket transitions, SLA creation, and role validation.
+- `npm test` runs Jest tests split by controller and middleware under `tests/`, using a temporary in-memory MongoDB database named `helpdesk-test`. The test database is isolated from development and production data.
 
 ## Project layout
 

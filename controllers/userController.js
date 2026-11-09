@@ -73,7 +73,7 @@ export const createUser = async (req, res) => {
             role: 'customer',
         });
         const token = createToken(newUser);
-        res.status(201).json({ user: newUser, token });
+        res.status(201).json({ user: newUser.toJSON(), token });
     } catch (error) {
         handleUserError(res, error, 'creating user');
     }
@@ -122,7 +122,7 @@ export const updateUser = async (req, res) => {
         const updatedUser = await User.findByIdAndUpdate(
             req.params.id,
             { $set: updates },
-            { new: true, runValidators: true, select: publicUserFields }
+            { returnDocument: 'after', runValidators: true, select: publicUserFields }
         );
         if (!updatedUser) {
             return res.status(404).json({ message: 'User not found' });

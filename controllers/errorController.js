@@ -9,7 +9,7 @@ export const errorHandler = (err, req, res, next) => {
             ? 400
             : 500;
     res.status(status).json({
-        message: status === 400 ? err.message : 'Internal Server Error',
+        message: status >= 400 && status < 500 ? err.message : 'Internal Server Error',
     });
 }   
 

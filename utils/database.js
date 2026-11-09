@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 
 const connectDB = async () => {
     try {
-        const MONGODB_URI =
+        const MONGODB_URI = process.env.MONGODB_URI ||
             `mongodb+srv://${process.env.MONGO_USERNAME}:${encodeURIComponent(process.env.MONGO_PASSWORD)}@node.3l7dvs8.mongodb.net/${process.env.DEFAULT_DATABASE}`;
 
         console.log("Connecting to MongoDB...");
@@ -13,7 +13,7 @@ const connectDB = async () => {
         console.log("Connected to MongoDB successfully!");
     } catch (error) {
         console.error("Error connecting to MongoDB:", error.message);
-        process.exit(1);
+        throw error;
     }
 };
 

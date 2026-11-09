@@ -160,7 +160,7 @@ ticketSchema.statics.updateWithAudit = async function (
     const updatedTicket = await this.findOneAndUpdate(
         { _id: ticketId, version: expectedVersion },
         update,
-        { new: true, runValidators: true }
+        { returnDocument: 'after', runValidators: true }
     );
     if (!updatedTicket) {
         const error = new Error('Ticket was updated by another user');
