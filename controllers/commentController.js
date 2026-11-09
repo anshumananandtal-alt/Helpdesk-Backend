@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import Comment from '../models/comments.js';
 import Ticket from '../models/ticket.js';
 import AuditTrail from '../models/auditTrail.js';
+import { canAccessTicket } from '../utils/ticketAccess.js';
 
 const isStaff = (role) => role === 'agent' || role === 'admin';
 
@@ -10,7 +11,7 @@ const getAccessibleTicket = async (ticketId, req) => {
         return null;
     }
     const ticket = await Ticket.findById(ticketId);
-    if (!ticket || (!isStaff(req.userRole) && ticket.creator.toString() !== req.userId)) {
+    if (!ticket || !canAccessTicket(ticket, { id: req.userId, role: req.userRole })) {
         return null;
     }
     return ticket;

@@ -78,6 +78,8 @@ All endpoints are prefixed with `/api`. Request and response bodies use JSON unl
 
 Registration accepts `name`, `email`, and `password`; public registration always creates a `customer`. The only roles are `customer`, `agent`, and `admin`; an admin can change a user's role.
 
+Admins cannot change their own role, deactivate or delete their own account, or demote/deactivate/delete the last active administrator.
+
 Example:
 
 ```json
@@ -113,7 +115,7 @@ Ticket fields include:
 - `fileName`, managed by the API when images are uploaded
 - `slaDeadline`, `breached`, and `version` (used for update concurrency checks)
 
-All ticket endpoints require a JWT using `Authorization: Bearer <token>`. Customers can see only their own tickets. The list supports `page`, `limit` (maximum 100), `status`, `priority`, `assignee`, `breached`, and `search` query parameters, and returns `{ tickets, page, limit, total, totalPages }`. Ticket updates require the current `version`; a stale version returns `409 Conflict`. Valid transitions and role permissions follow the lifecycle in `EXPECTED_README.md`. Changes to status, assignee, and priority are recorded in the audit trail; the version increases for any successful ticket change.
+All ticket endpoints require a JWT using `Authorization: Bearer <token>`. Customers can access only tickets they created; agents can access only tickets assigned to them; admins can access all tickets. The list supports `page`, `limit` (maximum 100), `status`, `priority`, `assignee`, `breached`, and `search` query parameters, and returns `{ tickets, page, limit, total, totalPages }`. Customer and agent ticket scoping is enforced by the server regardless of supplied filters. Ticket updates require the current `version`; a stale version returns `409 Conflict`. Valid transitions and role permissions follow the lifecycle in `EXPECTED_README.md`. Changes to status, assignee, and priority are recorded in the audit trail; the version increases for any successful ticket change.
 
 The SLA is set at creation based on priority (urgent 4h, high 8h, medium 24h, low 72h). Its clock pauses while the ticket is `waiting_on_customer`. `breached` in ticket responses is computed against the current deadline and is false for paused, resolved, or closed tickets.
 

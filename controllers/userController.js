@@ -100,6 +100,25 @@ export const updateUser = async (req, res) => {
         if (updates.isActive !== undefined && typeof updates.isActive !== 'boolean') {
             return res.status(400).json({ message: 'isActive must be a boolean' });
         }
+        const currentUser = await User.findById(req.params.id).select('role isActive');
+        if (!currentUser) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        const changesOwnAccess = req.userId === req.params.id &&
+            (updates.isActive === false ||
+                (updates.role !== undefined && updates.role !== currentUser.role));
+        if (changesOwnAccess) {
+            return res.status(403).json({ message: 'You cannot change your own role or deactivate your account' });
+        }
+        const removesActiveAdmin = currentUser.role === 'admin' &&
+            currentUser.isActive &&
+            (updates.isActive === false || (updates.role !== undefined && updates.role !== 'admin'));
+        if (removesActiveAdmin) {
+            const activeAdminCount = await User.countDocuments({ role: 'admin', isActive: true });
+            if (activeAdminCount <= 1) {
+                return res.status(409).json({ message: 'At least one active administrator must remain' });
+            }
+        }
         const updatedUser = await User.findByIdAndUpdate(
             req.params.id,
             { $set: updates },
@@ -118,6 +137,19 @@ export const deleteUser = async (req, res) => {
     try {
         if (!mongoose.isValidObjectId(req.params.id)) {
             return res.status(404).json({ message: 'User not found' });
+        }
+        if (req.userId === req.params.id) {
+            return res.status(403).json({ message: 'You cannot delete your own account' });
+        }
+        const userToDelete = await User.findById(req.params.id).select('role isActive');
+        if (!userToDelete) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        if (userToDelete.role === 'admin' && userToDelete.isActive) {
+            const activeAdminCount = await User.countDocuments({ role: 'admin', isActive: true });
+            if (activeAdminCount <= 1) {
+                return res.status(409).json({ message: 'At least one active administrator must remain' });
+            }
         }
         const deletedUser = await User.findByIdAndDelete(req.params.id);
         if (!deletedUser) {

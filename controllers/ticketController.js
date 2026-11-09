@@ -4,13 +4,10 @@ import AuditTrail from '../models/auditTrail.js';
 import User from '../models/user.js';
 import { postImage, deleteImage } from '../utils/awsService.js';
 import { STATUS_TRANSITIONS, getAllowedNextStatuses } from '../utils/ticketRules.js';
+import { getBreachedFilter, isTicketBreached } from '../utils/sla.js';
+import { canAccessTicket } from '../utils/ticketAccess.js';
 
-const isStaff = (role) => role === 'agent' || role === 'admin';
 const validPriorities = ['low', 'medium', 'high', 'urgent'];
-
-const canViewTicket = (ticket, req) =>
-    isStaff(req.userRole) || ticket.creator?._id?.toString() === req.userId ||
-    ticket.creator?.toString() === req.userId;
 
 const addSlaState = (ticket) => {
     const result = ticket.toObject ? ticket.toObject() : { ...ticket };
@@ -21,12 +18,7 @@ const addSlaState = (ticket) => {
         );
         result.slaDeadline = deadline;
     }
-    result.breached = Boolean(
-        deadline &&
-        result.status !== 'waiting_on_customer' &&
-        !['resolved', 'closed'].includes(result.status) &&
-        new Date(deadline) < new Date()
-    );
+    result.breached = isTicketBreached(result);
     delete result.slaDueAt;
     delete result.slaPausedAt;
     return result;
@@ -40,7 +32,9 @@ const getTicketForUser = async (id, req) => {
         .select('+slaDueAt +slaPausedAt')
         .populate('creator', 'name email')
         .populate('assignee', 'name email');
-    return ticket && canViewTicket(ticket, req) ? ticket : null;
+    return ticket && canAccessTicket(ticket, { id: req.userId, role: req.userRole })
+        ? ticket
+        : null;
 };
 
 export const getAllTickets = async (req, res) => {
@@ -54,6 +48,8 @@ export const getAllTickets = async (req, res) => {
         const filter = {};
         if (req.userRole === 'customer') {
             filter.creator = req.userId;
+        } else if (req.userRole === 'agent') {
+            filter.assignee = req.userId;
         } else if (req.query.assignee) {
             if (!mongoose.isValidObjectId(req.query.assignee)) {
                 return res.status(400).json({ message: 'Invalid assignee ID' });
@@ -86,25 +82,10 @@ export const getAllTickets = async (req, res) => {
                 return res.status(400).json({ message: 'breached must be true or false' });
             }
             const now = new Date();
-            if (req.query.breached === 'true') {
-                filter.$and = [
-                    ...(filter.$and ?? []),
-                    { status: { $nin: ['resolved', 'closed', 'waiting_on_customer'] } },
-                    { $or: [{ slaDeadline: { $lt: now } }, { slaDueAt: { $lt: now } }] },
-                ];
-            } else {
-                filter.$and = [
-                    ...(filter.$and ?? []),
-                    {
-                        $or: [
-                            { status: { $in: ['resolved', 'closed', 'waiting_on_customer'] } },
-                            { slaDeadline: { $gte: now } },
-                            { slaDueAt: { $gte: now } },
-                            { slaDeadline: { $exists: false }, slaDueAt: { $exists: false } },
-                        ],
-                    },
-                ];
-            }
+            filter.$and = [
+                ...(filter.$and ?? []),
+                getBreachedFilter(req.query.breached === 'true', now),
+            ];
         }
 
         const [tickets, total] = await Promise.all([
@@ -193,7 +174,7 @@ export const updateTicket = async (req, res) => {
         if (!ticket) {
             return res.status(404).json({ message: 'Ticket not found' });
         }
-        if (req.userRole === 'customer' && ticket.creator.toString() !== req.userId) {
+        if (!canAccessTicket(ticket, { id: req.userId, role: req.userRole })) {
             return res.status(403).json({ message: 'Access denied' });
         }
 

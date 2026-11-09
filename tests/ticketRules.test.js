@@ -4,6 +4,8 @@ import mongoose from 'mongoose';
 import Ticket from '../models/ticket.js';
 import User from '../models/user.js';
 import { getAllowedNextStatuses } from '../utils/ticketRules.js';
+import { getBreachedFilter, isTicketBreached } from '../utils/sla.js';
+import { canAccessTicket } from '../utils/ticketAccess.js';
 
 const customer = { id: 'customer-1', role: 'customer' };
 const otherCustomer = { id: 'customer-2', role: 'customer' };
@@ -61,4 +63,40 @@ test('public user roles are restricted to customer, agent, and admin', async () 
 
     assert.ok(error);
     assert.ok(error.errors.role);
+});
+
+test('legacy persisted breached tickets without an SLA deadline remain breached', () => {
+    const legacyTicket = {
+        status: 'open',
+        priority: 'urgent',
+        breached: true,
+    };
+    const filter = getBreachedFilter(true, new Date('2026-11-09T12:00:00.000Z'));
+
+    assert.equal(isTicketBreached(legacyTicket, new Date('2026-11-09T12:00:00.000Z')), true);
+    assert.ok(filter.$and[1].$or.some((condition) => condition.breached === true));
+});
+
+test('resolved, closed, and paused tickets do not count as breached', () => {
+    const now = new Date('2026-11-09T12:00:00.000Z');
+    for (const status of ['resolved', 'closed', 'waiting_on_customer']) {
+        assert.equal(isTicketBreached({
+            status,
+            breached: true,
+            slaDeadline: new Date('2026-11-08T12:00:00.000Z'),
+        }, now), false);
+    }
+});
+
+test('customers see created tickets, agents see assigned tickets, and admins see all', () => {
+    const ticket = {
+        creator: 'customer-1',
+        assignee: 'agent-1',
+    };
+
+    assert.equal(canAccessTicket(ticket, customer), true);
+    assert.equal(canAccessTicket(ticket, otherCustomer), false);
+    assert.equal(canAccessTicket(ticket, agent), true);
+    assert.equal(canAccessTicket(ticket, { id: 'agent-2', role: 'agent' }), false);
+    assert.equal(canAccessTicket(ticket, admin), true);
 });
