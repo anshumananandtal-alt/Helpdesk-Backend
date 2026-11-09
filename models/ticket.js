@@ -1,16 +1,26 @@
 import mongoose from "mongoose";
 import AuditTrail from "./auditTrail.js";
+import { STATUS_TRANSITIONS } from "../utils/ticketRules.js";
 
 const auditableFields = ['status', 'assignee', 'priority'];
+const SLA_HOURS = { urgent: 4, high: 8, medium: 24, low: 72 };
 
 const ticketSchema = new mongoose.Schema({
     title: {
         type: String,
-        required: true  
+        required: true,
+        minlength: 5,
+        trim: true,
     },
     description: {  
         type: String,
-        required: true
+        required: true,
+        minlength: 10,
+        trim: true,
+    },
+    category: {
+        type: String,
+        trim: true,
     }, 
     priority: {
         type: String,
@@ -19,7 +29,7 @@ const ticketSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['open', 'in progress', 'resolved', 'closed'],    
+        enum: Object.keys(STATUS_TRANSITIONS),
         default: 'open'
     },
     creator: {
@@ -37,8 +47,16 @@ const ticketSchema = new mongoose.Schema({
     resolvedAt: {
         type: Date
     },
-    slaDueAt: {
+    slaDeadline: {
         type: Date
+    },
+    slaDueAt: {
+        type: Date,
+        select: false,
+    },
+    slaPausedAt: {
+        type: Date,
+        select: false,
     },
     breached: {
         type: Boolean,
@@ -49,6 +67,18 @@ const ticketSchema = new mongoose.Schema({
         default: 1  
     },  
 }, { timestamps: true });
+
+ticketSchema.pre('validate', function () {
+    if (!this.slaDeadline && !this.slaDueAt && this.isNew) {
+        const hours = SLA_HOURS[this.priority] ?? SLA_HOURS.low;
+        this.slaDeadline = new Date(Date.now() + hours * 60 * 60 * 1000);
+        this.slaDueAt = this.slaDeadline;
+    } else if (this.slaDueAt && !this.slaDeadline) {
+        this.slaDeadline = this.slaDueAt;
+    } else if (this.slaDeadline && !this.slaDueAt) {
+        this.slaDueAt = this.slaDeadline;
+    }
+});
 
 ticketSchema.statics.updateWithAudit = async function (
     ticketId,
@@ -63,7 +93,8 @@ ticketSchema.statics.updateWithAudit = async function (
         throw new Error('A valid expected ticket version is required');
     }
 
-    const ticket = await this.findOne({ _id: ticketId, version: expectedVersion });
+    const ticket = await this.findOne({ _id: ticketId, version: expectedVersion })
+        .select('+slaDueAt +slaPausedAt');
     if (!ticket) {
         const error = new Error('Ticket was updated by another user');
         error.code = 'VERSION_CONFLICT';
@@ -73,6 +104,13 @@ ticketSchema.statics.updateWithAudit = async function (
     const definedChanges = Object.fromEntries(
         Object.entries(changes).filter(([, value]) => value !== undefined)
     );
+    if (definedChanges.status && definedChanges.status !== ticket.status) {
+        if (!STATUS_TRANSITIONS[ticket.status]?.includes(definedChanges.status)) {
+            const error = new Error(`Invalid status transition: ${ticket.status} -> ${definedChanges.status}`);
+            error.code = 'INVALID_STATUS_TRANSITION';
+            throw error;
+        }
+    }
     const changesToAudit = [];
     for (const field of auditableFields) {
         if (Object.prototype.hasOwnProperty.call(definedChanges, field) &&
@@ -95,14 +133,29 @@ ticketSchema.statics.updateWithAudit = async function (
         return ticket;
     }
 
+    const now = new Date();
     const update = {
         $set: { ...definedChanges },
         $inc: { version: 1 }
     };
-    if (definedChanges.status &&
-        ['resolved', 'closed'].includes(definedChanges.status) &&
-        !ticket.resolvedAt) {
-        update.$set.resolvedAt = new Date();
+    if (definedChanges.status === 'waiting_on_customer' &&
+        ticket.status !== 'waiting_on_customer') {
+        update.$set.slaPausedAt = now;
+    }
+    if (ticket.status === 'waiting_on_customer' &&
+        definedChanges.status && definedChanges.status !== 'waiting_on_customer') {
+        const pausedAt = ticket.slaPausedAt ?? now;
+        const extendedDeadline = new Date(
+            (ticket.slaDueAt ?? ticket.slaDeadline).getTime() + now.getTime() - pausedAt.getTime()
+        );
+        update.$set.slaDueAt = extendedDeadline;
+        update.$set.slaDeadline = extendedDeadline;
+        update.$unset = { slaPausedAt: 1 };
+    }
+    if (definedChanges.status === 'resolved') {
+        update.$set.resolvedAt = now;
+    } else if (definedChanges.status === 'reopened') {
+        update.$unset = { ...update.$unset, resolvedAt: 1 };
     }
     const updatedTicket = await this.findOneAndUpdate(
         { _id: ticketId, version: expectedVersion },

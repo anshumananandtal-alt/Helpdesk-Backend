@@ -21,7 +21,7 @@ A Node.js and Express REST API for managing helpdesk users, tickets, comments, a
 - Multer for image uploads
 - AWS SDK for S3
 
-Although `express-graphql` is listed as a dependency, the current application exposes Express REST routes and does not configure a GraphQL endpoint.
+This project exposes an Express REST API; it does not configure a GraphQL endpoint.
 
 ## Requirements
 
@@ -59,9 +59,7 @@ Although `express-graphql` is listed as a dependency, the current application ex
    npm run start:dev
    ```
 
-The application listens on port `8080`. The configured CORS origin is `http://localhost:5173`.
-
-> **Startup note:** The current source has import mismatches that must be corrected before the server will start. `app.js` imports the rate limiter from a path outside the project, and `routes/ticket.js` imports `getTickets`, which is not exported by `controllers/ticketController.js` (the controller exports `getAllTickets`). On case-sensitive filesystems, the `User.js` and `Ticket.js` imports in the controllers also do not match the lowercase model filenames.
+The application listens on port `8080` by default (or `PORT` if set). The configured CORS origin is `http://localhost:5173`. A frontend can use `VITE_API_BASE_URL=http://localhost:8080/api`.
 
 ## API
 
@@ -71,13 +69,14 @@ All endpoints are prefixed with `/api`. Request and response bodies use JSON unl
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/users/signup` | Create a user and return a JWT |
-| `POST` | `/api/users/login` | Verify credentials and return a JWT |
-| `GET` | `/api/users/:id` | Get a user by ID |
-| `PUT` | `/api/users/:id` | Update a user by ID |
-| `DELETE` | `/api/users/:id` | Delete a user by ID |
+| `POST` | `/api/auth/register` | Register a customer and return a JWT |
+| `POST` | `/api/auth/login` | Verify credentials and return a JWT |
+| `GET` | `/api/users` | Admin: list users |
+| `GET` | `/api/users/:id` | Get own user, or any user as admin |
+| `PATCH` | `/api/users/:id` | Admin: change role or deactivate/reactivate |
+| `DELETE` | `/api/users/:id` | Admin: delete a user |
 
-Signup accepts `name`, `email`, `password`, and `role`. The schema permits `admin`, `customer`, and `support`. Include a valid `role`: the schema's configured default (`user`) is not one of its permitted values.
+Registration accepts `name`, `email`, and `password`; public registration always creates a `customer`. The only roles are `customer`, `agent`, and `admin`; an admin can change a user's role.
 
 Example:
 
@@ -85,12 +84,11 @@ Example:
 {
   "name": "Alex Customer",
   "email": "alex@example.com",
-  "password": "replace-with-a-password",
-  "role": "customer"
+  "password": "replace-with-a-password"
 }
 ```
 
-Signup returns `201` with `{ "user": ..., "token": "..." }`. Login accepts `email` and `password` and returns the same shape. Tokens are signed using `JWT_SECRET` and expire after one hour.
+Registration returns `201` with `{ "user": ..., "token": "..." }`. Login accepts `email` and `password` and returns the same shape. Tokens are signed using `JWT_SECRET` and expire after one hour. Inactive users cannot log in or continue using an existing token.
 
 ### Tickets
 
@@ -99,40 +97,47 @@ Signup returns `201` with `{ "user": ..., "token": "..." }`. Login accepts `emai
 | `GET` | `/api/tickets` | List tickets |
 | `GET` | `/api/tickets/:id` | Get a ticket by ID |
 | `POST` | `/api/tickets` | Create a ticket |
-| `PUT` | `/api/tickets/:id` | Update a ticket |
-| `DELETE` | `/api/tickets/:id` | Delete a ticket |
+| `PATCH` | `/api/tickets/:id` | Update a ticket |
+| `DELETE` | `/api/tickets/:id` | Admin: delete a ticket |
+| `GET` | `/api/tickets/:id/comments` | List ticket comments |
+| `POST` | `/api/tickets/:id/comments` | Add a public comment or staff note |
+| `GET` | `/api/tickets/:id/audit` | Staff: list ticket audit history |
+| `GET` | `/api/dashboard` | Admin: dashboard metrics |
 
 Ticket fields include:
 
-- `title` and `description` (required when creating)
+- `title` (minimum 5 characters), `description` (minimum 10 characters), and optional `category`
 - `priority`: `low`, `medium`, `high`, or `urgent`
-- `status`: `open`, `in progress`, `resolved`, or `closed`
-- `creator` (required MongoDB user ID) and optional `assignee`
+- `status`: `open`, `in_progress`, `waiting_on_customer`, `resolved`, `reopened`, or `closed`
+- `creator` (derived from the authenticated user) and optional `assignee`
 - `fileName`, managed by the API when images are uploaded
-- `version`, used for update concurrency checks
+- `slaDeadline`, `breached`, and `version` (used for update concurrency checks)
 
-Ticket updates require the current `version`; a stale version returns `409 Conflict`. Successful changes to status, assignee, and priority are recorded in the audit trail, and the version increases when a ticket changes.
+All ticket endpoints require a JWT using `Authorization: Bearer <token>`. Customers can see only their own tickets. The list supports `page`, `limit` (maximum 100), `status`, `priority`, `assignee`, `breached`, and `search` query parameters, and returns `{ tickets, page, limit, total, totalPages }`. Ticket updates require the current `version`; a stale version returns `409 Conflict`. Valid transitions and role permissions follow the lifecycle in `EXPECTED_README.md`. Changes to status, assignee, and priority are recorded in the audit trail; the version increases for any successful ticket change.
 
-To attach images on ticket creation or update, send `multipart/form-data` with files under the repeated field name `image`. The upload middleware accepts PNG and JPEG/JPG images. Without image files, ticket creation can use JSON.
+The SLA is set at creation based on priority (urgent 4h, high 8h, medium 24h, low 72h). Its clock pauses while the ticket is `waiting_on_customer`. `breached` in ticket responses is computed against the current deadline and is false for paused, resolved, or closed tickets.
+
+To attach images on ticket creation or update, send `multipart/form-data` with files under the repeated field name `image`. The upload middleware accepts PNG and JPEG images up to 5 MB each (maximum five files per request). Without image files, ticket creation can use JSON.
 
 ### Comments
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/comments/tickets/:ticketId/comments` | Add a comment |
-| `GET` | `/api/comments/tickets/:ticketId/comments` | List comments for a ticket |
-| `PUT` | `/api/comments/tickets/:ticketId/comments/:commentId` | Update a comment |
-| `DELETE` | `/api/comments/tickets/:ticketId/comments/:commentId` | Delete a comment |
+| `POST` | `/api/tickets/:id/comments` | Add a comment |
+| `GET` | `/api/tickets/:id/comments` | List comments for a ticket |
+| `PUT` | `/api/tickets/:id/comments/:commentId` | Update a comment |
+| `DELETE` | `/api/tickets/:id/comments/:commentId` | Delete a comment |
 
-Create a comment with `text` and `author` (a user ID). Update a comment with `text`.
+Comment requests require authentication; the server derives `author` from the token. Send `text` and optionally `isInternal: true` to add an internal note (agents and admins only). Customers can read only public comments on their own tickets; staff can read both. Comment edits and deletes are limited to the author or an admin. For compatibility, the previous `/api/comments/tickets/:ticketId/comments` routes remain available.
 
 ### Admin
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/admin/dashboard` | Get dashboard metrics |
+| `GET` | `/api/dashboard` | Get dashboard metrics |
+| `GET` | `/api/admin/dashboard` | Get dashboard metrics (compatibility route) |
 
-This endpoint requires an admin JWT in the `Authorization` header:
+Both dashboard routes require an admin JWT in the `Authorization` header:
 
 ```http
 Authorization: Bearer <token>
@@ -140,13 +145,13 @@ Authorization: Bearer <token>
 
 The dashboard response contains `ticketCountPerStatus`, `averageResolutionHours`, and `breachedTicketsPerPriority`.
 
-## Current limitations
+## Authorization and limitations
 
-- `requireAdmin` is currently applied only to the admin dashboard route. The user, ticket, and comment routes do not have authentication middleware attached. Some ticket mutations nevertheless expect `req.userId` for ownership checks and auditing, so those operations are not fully wired to JWT authentication.
+- Ticket, comment, user-management, audit, and dashboard operations enforce authentication and role/ownership rules on the server.
 - Ticket image uploads require valid AWS S3 configuration. Images are stored under the `images/` key prefix.
-- The rate limiter is applied globally and allows up to five requests per IP per 15-minute window.
-- `npm test` is a placeholder that exits with an error; no test suite is configured yet.
-- The package does not define a production `start` script.
+- The rate limiter is applied globally and allows up to 100 requests per IP per 15-minute window.
+- Legacy user auth (`/api/users/signup`, `/api/users/login`), ticket `PUT`, and comment routes remain available for compatibility.
+- `npm test` runs the built-in Node.js tests for role-based ticket transitions, SLA creation, and role validation.
 
 ## Project layout
 

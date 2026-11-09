@@ -4,6 +4,7 @@ import { requireAdmin } from '../middleware/auth.js';
 
 const router = Router();
 
-router.get('/dashboard', requireAdmin, getDashboard);
+router.get('/dashboard', ...requireAdmin, getDashboard);
+router.get('/', ...requireAdmin, getDashboard);
 
 export default router;

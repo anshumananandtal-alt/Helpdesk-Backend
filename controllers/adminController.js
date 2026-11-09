@@ -1,36 +1,22 @@
-import Ticket from '../models/Ticket.js';
+import Ticket from '../models/ticket.js';
 
 export const getDashboard = async (req, res) => {
     try {
+        const now = new Date();
         const [dashboard = {
             ticketCountPerStatus: [],
             averageResolutionHours: 0,
-            breachedTicketsPerPriority: []
+            breachedTicketsPerPriority: [],
         }] = await Ticket.aggregate([
             {
                 $facet: {
                     ticketCountPerStatus: [
-                        {
-                            $group: {
-                                _id: '$status',
-                                count: { $sum: 1 }
-                            }
-                        },
+                        { $group: { _id: '$status', count: { $sum: 1 } } },
                         { $sort: { _id: 1 } },
-                        {
-                            $project: {
-                                _id: 0,
-                                status: '$_id',
-                                count: 1
-                            }
-                        }
+                        { $project: { _id: 0, status: '$_id', count: 1 } },
                     ],
                     averageResolutionTime: [
-                        {
-                            $match: {
-                                resolvedAt: { $ne: null }
-                            }
-                        },
+                        { $match: { resolvedAt: { $type: 'date' } } },
                         {
                             $group: {
                                 _id: null,
@@ -38,64 +24,41 @@ export const getDashboard = async (req, res) => {
                                     $avg: {
                                         $divide: [
                                             { $subtract: ['$resolvedAt', '$createdAt'] },
-                                            1000 * 60 * 60
-                                        ]
-                                    }
-                                }
-                            }
+                                            60 * 60 * 1000,
+                                        ],
+                                    },
+                                },
+                            },
                         },
-                        {
-                            $project: {
-                                _id: 0,
-                                averageHours: {
-                                    $round: ['$averageHours', 2]
-                                }
-                            }
-                        }
+                        { $project: { _id: 0, averageHours: { $round: ['$averageHours', 2] } } },
                     ],
                     breachedTicketsPerPriority: [
                         {
                             $match: {
+                                status: { $nin: ['resolved', 'closed', 'waiting_on_customer'] },
                                 $or: [
                                     { breached: true },
-                                    {
-                                        slaDueAt: { $lt: new Date() },
-                                        status: { $nin: ['resolved', 'closed'] }
-                                    }
-                                ]
-                            }
+                                    { slaDeadline: { $lt: now } },
+                                    { slaDueAt: { $lt: now } },
+                                ],
+                            },
                         },
-                        {
-                            $group: {
-                                _id: '$priority',
-                                count: { $sum: 1 }
-                            }
-                        },
+                        { $group: { _id: '$priority', count: { $sum: 1 } } },
                         { $sort: { _id: 1 } },
-                        {
-                            $project: {
-                                _id: 0,
-                                priority: '$_id',
-                                count: 1
-                            }
-                        }
-                    ]
-                }
+                        { $project: { _id: 0, priority: '$_id', count: 1 } },
+                    ],
+                },
             },
             {
                 $project: {
                     ticketCountPerStatus: 1,
                     averageResolutionHours: {
-                        $ifNull: [
-                            { $arrayElemAt: ['$averageResolutionTime.averageHours', 0] },
-                            0
-                        ]
+                        $ifNull: [{ $arrayElemAt: ['$averageResolutionTime.averageHours', 0] }, 0],
                     },
-                    breachedTicketsPerPriority: 1
-                }
-            }
+                    breachedTicketsPerPriority: 1,
+                },
+            },
         ]);
-
         res.json(dashboard);
     } catch (error) {
         console.error('Error generating admin dashboard:', error);

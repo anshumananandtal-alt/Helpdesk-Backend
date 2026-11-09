@@ -1,15 +1,16 @@
 {
   "name": "helpdesk_backend",
   "version": "1.0.0",
-  "description": "Helpdesk backend in node.js, mongodb and graphQL",
+  "description": "Helpdesk REST API in Node.js and MongoDB",
   "main": "app.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test",
+    "start": "node app.js",
     "start:dev": "nodemon app.js"
   },
   "keywords": [
     "node.js",
-    "graphQL",
+    "REST API",
     "mongodb"
   ],
   "author": "Anshuman Anand",
