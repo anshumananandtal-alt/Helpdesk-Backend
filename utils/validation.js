@@ -6,7 +6,7 @@ export const loginValidation = () =>{
         .isEmail()
         .withMessage('Please enter the valid email')
         .trim(),
-        body('password', 'Password should be 5 char long and it should be alphanumeric')
+        body('password', 'Password should be 5 char long.')
         .isLength({ min: 5}).trim()
     ]
 }
@@ -33,9 +33,8 @@ export const signUpValidation = () =>{
                         return true
                     })
                 }).trim(),
-            body('password', 'Password should be 5 character in length and it should contain alpha numeric value')
-            .isLength({ min: 5})
-            .isAlphanumeric().trim(),
+            body('password', 'Password should be 5 character in length.')
+            .isLength({ min: 5}).trim(),
             body('confirmPassword')
             .custom((value, {req})=>{
                 if(value !== req.body.password){
