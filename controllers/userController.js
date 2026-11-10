@@ -3,6 +3,7 @@ import User from '../models/user.js';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import emailService from '../utils/emailService.js';
+import { validationResult } from 'express-validator';
 
 const publicUserFields = 'name email role isActive createdAt updatedAt';
 
@@ -57,6 +58,10 @@ export const getUser = async (req, res) => {
 
 export const createUser = async (req, res) => {
     const { name, email, password } = req.body;
+    const errors = validationResult(req);
+    if(!errors.isEmpty()){
+        return res.status(422).json({ errors: errors.array() });
+    }
     try {
         if (typeof name !== 'string' || !name.trim() ||
             typeof email !== 'string' ||
@@ -173,6 +178,10 @@ export const deleteUser = async (req, res) => {
 
 export const loginUser = async (req, res) => {
     const { email, password } = req.body;
+    const errors = validationResult(req);
+    if(!errors.isEmpty()){
+        return res.status(422).json({ errors: errors.array() });
+    }
     try {
         const user = await User.findOne({ email: String(email ?? '').trim().toLowerCase() })
             .select('+password');

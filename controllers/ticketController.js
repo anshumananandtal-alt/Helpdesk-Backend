@@ -7,6 +7,7 @@ import { STATUS_TRANSITIONS, getAllowedNextStatuses } from '../utils/ticketRules
 import { getBreachedFilter, isTicketBreached } from '../utils/sla.js';
 import { canAccessTicket } from '../utils/ticketAccess.js';
 import emailService from '../utils/emailService.js';
+import { validationResult } from 'express-validator';
 
 const validPriorities = ['low', 'medium', 'high', 'urgent'];
 
@@ -205,6 +206,10 @@ export const deleteTicketImage = async (req, res) => {
 
 export const createTicket = async (req, res) => {
     let uploadedFileNames = [];
+    const errors = validationResult(req);
+    if(!errors.isEmpty()){
+        return res.status(422).json({ errors: errors.array() });
+    }
     try {
         const files = Array.isArray(req.files) ? req.files : [];
         for (const file of files) {
