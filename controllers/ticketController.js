@@ -6,6 +6,7 @@ import { postImage, deleteImage } from '../utils/awsService.js';
 import { STATUS_TRANSITIONS, getAllowedNextStatuses } from '../utils/ticketRules.js';
 import { getBreachedFilter, isTicketBreached } from '../utils/sla.js';
 import { canAccessTicket } from '../utils/ticketAccess.js';
+import emailService from '../utils/emailService.js';
 
 const validPriorities = ['low', 'medium', 'high', 'urgent'];
 
@@ -184,6 +185,7 @@ export const updateTicket = async (req, res) => {
                 .filter((field) => Object.hasOwn(req.body, field))
                 .map((field) => [field, req.body[field]])
         );
+        let assignedUser;
 
         if (req.userRole === 'customer') {
             const fields = Object.keys(changes);
@@ -197,12 +199,12 @@ export const updateTicket = async (req, res) => {
                 if (!mongoose.isValidObjectId(changes.assignee)) {
                     return res.status(400).json({ message: 'Invalid assignee ID' });
                 }
-                const assignee = await User.findOne({
+                assignedUser = await User.findOne({
                     _id: changes.assignee,
                     role: { $in: ['agent', 'admin'] },
                     isActive: true,
-                }).select('_id');
-                if (!assignee) {
+                }).select('name email');
+                if (!assignedUser) {
                     return res.status(400).json({ message: 'Assignee must be an active agent or admin' });
                 }
             }
@@ -243,6 +245,18 @@ export const updateTicket = async (req, res) => {
             expectedVersion
         );
         updateSucceeded = true;
+
+        if (assignedUser && String(ticket.assignee ?? '') !== String(assignedUser._id)) {
+            try {
+                await emailService.sendEmail({
+                    to: assignedUser.email,
+                    subject: 'A helpdesk ticket has been assigned to you',
+                    text: `Hello ${assignedUser.name},\n\nTicket "${updatedTicket.title}" has been assigned to you.\nTicket ID: ${updatedTicket._id}`,
+                });
+            } catch (emailError) {
+                console.error('Error sending ticket assignment email:', emailError);
+            }
+        }
 
         if (hasFileUpdate) {
             await Promise.all(oldFileNames

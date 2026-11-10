@@ -1,7 +1,8 @@
-import { describe, expect, test } from '@jest/globals';
+import { describe, expect, jest, test } from '@jest/globals';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import User from '../models/user.js';
+import emailService from '../utils/emailService.js';
 import {
     createUser,
     deleteUser,
@@ -46,6 +47,7 @@ describe('user controller', () => {
     });
 
     test('registers a customer, hashes the password, and returns a JWT', async () => {
+        const sendEmail = jest.spyOn(emailService, 'sendEmail').mockResolvedValue({});
         const response = makeResponse();
 
         await createUser(makeRequest({
@@ -56,6 +58,11 @@ describe('user controller', () => {
         expect(response.body.user.role).toBe('customer');
         expect(response.body.user.password).toBeUndefined();
         expect(jwt.verify(response.body.token, process.env.JWT_SECRET).role).toBe('customer');
+        expect(sendEmail).toHaveBeenCalledWith({
+            to: 'new@example.test',
+            subject: 'Welcome to Helpdesk',
+            text: 'Hello New customer,\n\nYour Helpdesk account has been created successfully.',
+        });
         const storedUser = await User.findOne({ email: 'new@example.test' }).select('+password');
         expect(storedUser.password).not.toBe('long-password');
     });

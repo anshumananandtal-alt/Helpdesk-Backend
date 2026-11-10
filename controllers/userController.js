@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import User from '../models/user.js';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import emailService from '../utils/emailService.js';
 
 const publicUserFields = 'name email role isActive createdAt updatedAt';
 
@@ -73,6 +74,15 @@ export const createUser = async (req, res) => {
             role: 'customer',
         });
         const token = createToken(newUser);
+        try {
+            await emailService.sendEmail({
+                to: newUser.email,
+                subject: 'Welcome to Helpdesk',
+                text: `Hello ${newUser.name},\n\nYour Helpdesk account has been created successfully.`,
+            });
+        } catch (emailError) {
+            console.error('Error sending registration email:', emailError);
+        }
         res.status(201).json({ user: newUser.toJSON(), token });
     } catch (error) {
         handleUserError(res, error, 'creating user');

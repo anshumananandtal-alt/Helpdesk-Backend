@@ -1,7 +1,8 @@
-import { describe, expect, test } from '@jest/globals';
+import { describe, expect, jest, test } from '@jest/globals';
 import mongoose from 'mongoose';
 import AuditTrail from '../models/auditTrail.js';
 import Ticket from '../models/ticket.js';
+import emailService from '../utils/emailService.js';
 import {
     createTicket,
     deleteTicket,
@@ -109,6 +110,24 @@ describe('ticket controller', () => {
         }), conflict);
         expect(conflict.statusCode).toBe(409);
         expect(conflict.body.code).toBe('VERSION_CONFLICT');
+    });
+
+    test('emails an agent when a ticket is assigned to them', async () => {
+        const sendEmail = jest.spyOn(emailService, 'sendEmail').mockResolvedValue({});
+        const ticket = await makeTicket();
+        const response = makeResponse();
+
+        await updateTicket(makeUserRequest(users.admin, {
+            params: { id: ticket._id.toString() },
+            body: { version: 1, assignee: users.agent._id.toString() },
+        }), response);
+
+        expect(response.statusCode).toBe(200);
+        expect(sendEmail).toHaveBeenCalledWith({
+            to: users.agent.email,
+            subject: 'A helpdesk ticket has been assigned to you',
+            text: `Hello ${users.agent.name},\n\nTicket "${ticket.title}" has been assigned to you.\nTicket ID: ${ticket._id}`,
+        });
     });
 
     test('deletes tickets only for admins', async () => {

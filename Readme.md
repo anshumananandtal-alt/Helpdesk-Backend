@@ -49,6 +49,9 @@ This project exposes an Express REST API; it does not configure a GraphQL endpoi
    AWS_ACCESS_KEY_ID=your_aws_access_key_id
    AWS_SECRET_ACCESS_KEY=your_aws_secret_access_key
    AWS_S3_BUCKET=your_s3_bucket_name
+
+   SEND_GRID_KEY=your_sendgrid_api_key
+   EMAIL_FROM=your_verified_sendgrid_sender@example.com
    ```
 
    The MongoDB connection string is assembled in `utils/database.js` for the configured MongoDB Atlas host. Do not commit real credentials.
@@ -76,7 +79,7 @@ All endpoints are prefixed with `/api`. Request and response bodies use JSON unl
 | `PATCH` | `/api/users/:id` | Admin: change role or deactivate/reactivate |
 | `DELETE` | `/api/users/:id` | Admin: delete a user |
 
-Registration accepts `name`, `email`, and `password`; public registration always creates a `customer`. The only roles are `customer`, `agent`, and `admin`; an admin can change a user's role.
+Registration accepts `name`, `email`, and `password`; public registration always creates a `customer` and sends a welcome email. The only roles are `customer`, `agent`, and `admin`; an admin can change a user's role. Configure `SEND_GRID_KEY` and a verified SendGrid sender in `EMAIL_FROM` for email notifications.
 
 Admins cannot change their own role, deactivate or delete their own account, or demote/deactivate/delete the last active administrator.
 
@@ -114,6 +117,8 @@ Ticket fields include:
 - `creator` (derived from the authenticated user) and optional `assignee`
 - `fileName`, managed by the API when images are uploaded
 - `slaDeadline`, `breached`, and `version` (used for update concurrency checks)
+
+When a ticket is assigned to a new agent or admin, an assignment email is sent to that user. Notification delivery errors are logged and do not undo a successful registration or ticket update.
 
 All ticket endpoints require a JWT using `Authorization: Bearer <token>`. Customers can access only tickets they created; agents can access only tickets assigned to them; admins can access all tickets. The list supports `page`, `limit` (maximum 100), `status`, `priority`, `assignee`, `breached`, and `search` query parameters, and returns `{ tickets, page, limit, total, totalPages }`. Customer and agent ticket scoping is enforced by the server regardless of supplied filters. Ticket updates require the current `version`; a stale version returns `409 Conflict`. Valid transitions and role permissions follow the lifecycle in `EXPECTED_README.md`. Changes to status, assignee, and priority are recorded in the audit trail; the version increases for any successful ticket change.
 
