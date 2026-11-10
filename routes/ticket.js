@@ -18,6 +18,7 @@ import {
 } from '../controllers/commentController.js';
 import { requireAuth } from '../middleware/auth.js';
 import { getTicketFileExtension } from '../utils/ticketFileTypes.js';
+import { addEditTicket } from '../utils/validation.js';
 
 const router = Router();
 const uploadImages = multer({
@@ -34,7 +35,7 @@ const uploadImages = multer({
 router.use(requireAuth);
 router.use(uploadImages);
 router.get('/', getAllTickets);
-router.post('/', createTicket);
+router.post('/', addEditTicket(), createTicket);
 router.get('/:id/images/:imageIndex', getTicketImage);
 router.delete('/:id/images/:imageIndex', deleteTicketImage);
 router.get('/:id/audit', getTicketAudit);
