@@ -101,6 +101,8 @@ Registration returns `201` with `{ "user": ..., "token": "..." }`. Login accepts
 |---|---|---|
 | `GET` | `/api/tickets` | List tickets |
 | `GET` | `/api/tickets/:id` | Get a ticket by ID |
+| `GET` | `/api/tickets/:id/images/:imageIndex` | Get an attached ticket image |
+| `DELETE` | `/api/tickets/:id/images/:imageIndex` | Remove an attached ticket file |
 | `POST` | `/api/tickets` | Create a ticket |
 | `PATCH` | `/api/tickets/:id` | Update a ticket |
 | `DELETE` | `/api/tickets/:id` | Admin: delete a ticket |
@@ -124,7 +126,9 @@ All ticket endpoints require a JWT using `Authorization: Bearer <token>`. Custom
 
 The SLA is set at creation based on priority (urgent 4h, high 8h, medium 24h, low 72h). Its clock pauses while the ticket is `waiting_on_customer`. `breached` in ticket responses is computed against the current deadline and is false for paused, resolved, or closed tickets.
 
-To attach images on ticket creation or update, send `multipart/form-data` with files under the repeated field name `image`. The upload middleware accepts PNG and JPEG images up to 5 MB each (maximum five files per request). Without image files, ticket creation can use JSON.
+To attach files on ticket creation or update, send `multipart/form-data` with files under the repeated field name `image`. PDF, DOC, DOCX, PNG, JPEG, GIF, WEBP, BMP, and TIFF files are accepted up to 5 MB each (maximum five files per request). Without attachments, ticket creation can use JSON. Updating a ticket preserves existing attachments and appends any newly uploaded files.
+
+Retrieve or remove an attached file through the authenticated image endpoint using its zero-based index in the ticket's `fileName` array. The API checks ticket access; removal increments the ticket version. AWS credentials must remain configured on the backend and must not be exposed through frontend environment variables.
 
 ### Comments
 

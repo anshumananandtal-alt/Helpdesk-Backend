@@ -68,6 +68,8 @@ const ticketSchema = new mongoose.Schema({
     },  
 }, { timestamps: true });
 
+ticketSchema.index({ title: 'text' });
+
 ticketSchema.pre('validate', function () {
     if (!this.slaDeadline && !this.slaDueAt && this.isNew) {
         const hours = SLA_HOURS[this.priority] ?? SLA_HOURS.low;

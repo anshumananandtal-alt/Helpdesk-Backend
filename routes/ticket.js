@@ -4,6 +4,8 @@ import {
     createTicket,
     getAllTickets,
     getTicketById,
+    getTicketImage,
+    deleteTicketImage,
     updateTicket,
     deleteTicket,
     getTicketAudit,
@@ -15,16 +17,17 @@ import {
     deleteComment,
 } from '../controllers/commentController.js';
 import { requireAuth } from '../middleware/auth.js';
+import { getTicketFileExtension } from '../utils/ticketFileTypes.js';
 
 const router = Router();
 const uploadImages = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: 5 * 1024 * 1024, files: 5 },
     fileFilter(req, file, callback) {
-        if (['image/png', 'image/jpeg'].includes(file.mimetype)) {
+        if (getTicketFileExtension(file.mimetype)) {
             return callback(null, true);
         }
-        return callback(new Error('Only PNG and JPEG images are supported'));
+        return callback(new Error('Only PDF, DOC, DOCX, and supported image files are allowed'));
     },
 }).array('image');
 
@@ -32,6 +35,8 @@ router.use(requireAuth);
 router.use(uploadImages);
 router.get('/', getAllTickets);
 router.post('/', createTicket);
+router.get('/:id/images/:imageIndex', getTicketImage);
+router.delete('/:id/images/:imageIndex', deleteTicketImage);
 router.get('/:id/audit', getTicketAudit);
 router.get('/:id/comments', (req, res, next) => {
     req.params.ticketId = req.params.id;

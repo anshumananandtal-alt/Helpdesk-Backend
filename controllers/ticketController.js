@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import Ticket from '../models/ticket.js';
 import AuditTrail from '../models/auditTrail.js';
 import User from '../models/user.js';
-import { postImage, deleteImage } from '../utils/awsService.js';
+import { postImage, getImage, deleteImage } from '../utils/awsService.js';
 import { STATUS_TRANSITIONS, getAllowedNextStatuses } from '../utils/ticketRules.js';
 import { getBreachedFilter, isTicketBreached } from '../utils/sla.js';
 import { canAccessTicket } from '../utils/ticketAccess.js';
@@ -125,6 +125,84 @@ export const getTicketById = async (req, res) => {
     }
 };
 
+export const getTicketImage = async (req, res) => {
+    try {
+        const imageIndex = Number(req.params.imageIndex);
+        if (!mongoose.isValidObjectId(req.params.id) ||
+            !Number.isInteger(imageIndex) ||
+            imageIndex < 0) {
+            return res.status(404).json({ message: 'Ticket image not found' });
+        }
+
+        const ticket = await getTicketForUser(req.params.id, req);
+        const imageKey = ticket?.fileName?.[imageIndex];
+        if (!imageKey) {
+            return res.status(404).json({ message: 'Ticket image not found' });
+        }
+
+        const image = await getImage(imageKey);
+        if (!image.Body) {
+            throw new Error('Ticket image has no response body');
+        }
+        const imageBytes = await image.Body.transformToByteArray();
+        res.set('Content-Type', image.ContentType || 'application/octet-stream');
+        res.set('Cache-Control', 'private, no-store');
+        res.set('X-Content-Type-Options', 'nosniff');
+        res.send(Buffer.from(imageBytes));
+    } catch (error) {
+        if (error.name === 'NoSuchKey' || error.name === 'NotFound') {
+            return res.status(404).json({ message: 'Ticket image not found' });
+        }
+        console.error('Error fetching ticket image:', error);
+        res.status(500).json({ message: 'Error fetching ticket image' });
+    }
+};
+
+export const deleteTicketImage = async (req, res) => {
+    try {
+        const imageIndex = Number(req.params.imageIndex);
+        if (!mongoose.isValidObjectId(req.params.id) ||
+            !Number.isInteger(imageIndex) ||
+            imageIndex < 0) {
+            return res.status(404).json({ message: 'Ticket image not found' });
+        }
+
+        const ticket = await getTicketForUser(req.params.id, req);
+        if (!ticket) {
+            return res.status(404).json({ message: 'Ticket image not found' });
+        }
+        const imageKey = ticket.fileName?.[imageIndex];
+        if (!imageKey) {
+            return res.status(404).json({ message: 'Ticket image not found' });
+        }
+
+        const remainingFileNames = ticket.fileName.filter((_, index) => index !== imageIndex);
+        const updatedTicket = await Ticket.updateWithAudit(
+            ticket._id,
+            { fileName: remainingFileNames },
+            req.userId,
+            ticket.version
+        );
+        if (!updatedTicket.fileName.includes(imageKey)) {
+            await deleteImage(imageKey);
+        }
+
+        res.json({
+            message: 'Ticket image deleted successfully',
+            version: updatedTicket.version,
+        });
+    } catch (error) {
+        if (error.code === 'VERSION_CONFLICT') {
+            return res.status(409).json({
+                message: 'This ticket was updated by someone else. Refresh and try again.',
+                code: 'VERSION_CONFLICT',
+            });
+        }
+        console.error('Error deleting ticket image:', error);
+        res.status(500).json({ message: 'Error deleting ticket image' });
+    }
+};
+
 export const createTicket = async (req, res) => {
     let uploadedFileNames = [];
     try {
@@ -225,17 +303,11 @@ export const updateTicket = async (req, res) => {
             uploadedFileNames.push(await postImage(file));
         }
         const oldFileNames = ticket.fileName ?? [];
-        const hasFileUpdate = files.length > 0 ||
-            Object.hasOwn(req.body, 'existingFileNames');
-        let fileNames;
-        if (hasFileUpdate) {
-            const retainedFileNames = parseFileList(req.body.existingFileNames)
-                .filter((fileName) => oldFileNames.includes(fileName));
+        if (files.length > 0 || Object.hasOwn(req.body, 'fileOrder')) {
             const fileOrder = parseFileList(req.body.fileOrder);
-            fileNames = fileOrder.length
-                ? buildFileOrder(fileOrder, retainedFileNames, uploadedFileNames)
-                : [...retainedFileNames, ...uploadedFileNames];
-            changes.fileName = fileNames;
+            changes.fileName = fileOrder.length
+                ? buildFileOrder(fileOrder, oldFileNames, uploadedFileNames)
+                : [...oldFileNames, ...uploadedFileNames];
         }
 
         const updatedTicket = await Ticket.updateWithAudit(
@@ -258,11 +330,6 @@ export const updateTicket = async (req, res) => {
             }
         }
 
-        if (hasFileUpdate) {
-            await Promise.all(oldFileNames
-                .filter((fileName) => !fileNames.includes(fileName))
-                .map((fileName) => deleteImage(fileName)));
-        }
         const populatedTicket = await Ticket.findById(updatedTicket._id)
             .select('+slaDueAt +slaPausedAt')
             .populate('creator', 'name email')

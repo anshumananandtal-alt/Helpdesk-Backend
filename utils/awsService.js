@@ -1,5 +1,6 @@
-import { PutObjectCommand, DeleteObjectCommand, S3Client} from '@aws-sdk/client-s3'
+import { PutObjectCommand, GetObjectCommand, DeleteObjectCommand, S3Client} from '@aws-sdk/client-s3'
 import { randomUUID} from 'crypto'
+import { getTicketFileExtension } from './ticketFileTypes.js';
 const s3 = new S3Client({
     region: process.env.AWS_REGION,
     credentials: {
@@ -12,13 +13,10 @@ const bucket  = process.env.AWS_S3_BUCKET
 
 
 export const postImage = async(file)=>{
-  const extensionMap = {
-    'image/jpeg': '.jpg',
-    'image/png': '.png',
-    'image/webp': '.webp',
-  };
-
-  const extension = extensionMap[file.mimetype];
+  const extension = getTicketFileExtension(file.mimetype);
+  if (!extension) {
+    throw new Error('Unsupported ticket file type');
+  }
   const key  = `images/${randomUUID()}${extension}`
   const result = await s3.send(new PutObjectCommand({
     Key: key,
@@ -29,6 +27,12 @@ export const postImage = async(file)=>{
   return key
 }
 
+export const getImage = async(key)=>{
+  return s3.send(new GetObjectCommand({
+    Key: key,
+    Bucket: bucket
+  }))
+}
 
 export const deleteImage = async(key)=>{
     const deleteResult = await s3.send(new DeleteObjectCommand({

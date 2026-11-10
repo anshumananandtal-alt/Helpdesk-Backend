@@ -1,11 +1,13 @@
 import { describe, expect, jest, test } from '@jest/globals';
 import mongoose from 'mongoose';
+import { S3Client } from '@aws-sdk/client-s3';
 import AuditTrail from '../models/auditTrail.js';
 import Ticket from '../models/ticket.js';
 import emailService from '../utils/emailService.js';
 import {
     createTicket,
     deleteTicket,
+    deleteTicketImage,
     getAllTickets,
     getTicketAudit,
     getTicketById,
@@ -28,6 +30,10 @@ const makeTicket = (fields = {}) => Ticket.create({
 });
 
 describe('ticket controller', () => {
+    test('defines a text index on ticket titles', () => {
+        expect(Ticket.schema.indexes().some(([fields]) => fields.title === 'text')).toBe(true);
+    });
+
     test('lists only tickets created by the customer and paginates results', async () => {
         await makeTicket();
         await makeTicket({ creator: users.agent._id });
@@ -110,6 +116,65 @@ describe('ticket controller', () => {
         }), conflict);
         expect(conflict.statusCode).toBe(409);
         expect(conflict.body.code).toBe('VERSION_CONFLICT');
+    });
+
+    test('preserves existing files when updating a ticket', async () => {
+        const existingFile = 'images/existing.png';
+        const ticket = await makeTicket({ fileName: [existingFile] });
+        const response = makeResponse();
+
+        await updateTicket(makeUserRequest(users.admin, {
+            params: { id: ticket._id.toString() },
+            body: { version: 1, title: 'Updated checkout payment issue', existingFileNames: '[]' },
+        }), response);
+
+        expect(response.statusCode).toBe(200);
+        expect(response.body.fileName).toEqual([existingFile]);
+    });
+
+    test('appends new uploads without removing existing files', async () => {
+        jest.spyOn(S3Client.prototype, 'send').mockResolvedValue({});
+        const existingFile = 'images/existing.png';
+        const ticket = await makeTicket({ fileName: [existingFile] });
+        const response = makeResponse();
+
+        await updateTicket(makeUserRequest(users.admin, {
+            params: { id: ticket._id.toString() },
+            body: { version: 1 },
+            files: [{ mimetype: 'image/png', buffer: Buffer.from('new image') }],
+        }), response);
+
+        expect(response.statusCode).toBe(200);
+        expect(response.body.fileName).toHaveLength(2);
+        expect(response.body.fileName[0]).toBe(existingFile);
+        expect(response.body.fileName[1]).toMatch(/^images\/.+\.png$/);
+    });
+
+    test('deletes only the selected file and increments the ticket version', async () => {
+        const deleteObject = jest.spyOn(S3Client.prototype, 'send').mockResolvedValue({});
+        const ticket = await makeTicket({
+            fileName: ['images/remove.png', 'images/keep.pdf'],
+        });
+        const response = makeResponse();
+
+        await deleteTicketImage(makeUserRequest(users.admin, {
+            params: { id: ticket._id.toString(), imageIndex: '0' },
+        }), response);
+
+        expect(response.statusCode).toBe(200);
+        expect(response.body.version).toBe(2);
+        expect((await Ticket.findById(ticket._id)).fileName).toEqual(['images/keep.pdf']);
+        expect(deleteObject).toHaveBeenCalledTimes(1);
+    });
+
+    test('returns not found for an invalid ticket file index', async () => {
+        const response = makeResponse();
+
+        await deleteTicketImage(makeUserRequest(users.admin, {
+            params: { id: new mongoose.Types.ObjectId().toString(), imageIndex: 'invalid' },
+        }), response);
+
+        expect(response.statusCode).toBe(404);
     });
 
     test('emails an agent when a ticket is assigned to them', async () => {
