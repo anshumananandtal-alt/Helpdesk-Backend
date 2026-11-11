@@ -27,7 +27,7 @@ app.use((req, res, next) => {
     next();
 });
 
-app.use(rateLimiter);
+// app.use(rateLimiter);
 app.use('/api/auth', authRoutes);
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/admin', adminRoutes);

@@ -55,7 +55,7 @@ export const addEditTicket = () => {
         .isString()
         .trim(),
         body('priority', 'Please select a valid priority')
-        .isIn(['low', 'medium', 'high'])    
+        .isIn(['low', 'medium', 'high', 'urgent'])
         .trim(),
         body('category', 'Please select a valid category')
         .isString()

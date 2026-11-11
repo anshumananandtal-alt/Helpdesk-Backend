@@ -4,7 +4,7 @@ import AuditTrail from '../models/auditTrail.js';
 import User from '../models/user.js';
 import { postImage, getImage, deleteImage } from '../utils/awsService.js';
 import { STATUS_TRANSITIONS, getAllowedNextStatuses } from '../utils/ticketRules.js';
-import { getBreachedFilter, isTicketBreached } from '../utils/sla.js';
+import { getBreachedFilter, getTicketSlaDeadline, isTicketBreached } from '../utils/sla.js';
 import { canAccessTicket } from '../utils/ticketAccess.js';
 import emailService from '../utils/emailService.js';
 import { validationResult } from 'express-validator';
@@ -13,7 +13,10 @@ const validPriorities = ['low', 'medium', 'high', 'urgent'];
 
 const addSlaState = (ticket) => {
     const result = ticket.toObject ? ticket.toObject() : { ...ticket };
-    let deadline = result.slaDeadline ?? result.slaDueAt;
+    let deadline = getTicketSlaDeadline(result);
+    if (deadline) {
+        result.slaDeadline = deadline;
+    }
     if (deadline && result.status === 'waiting_on_customer' && result.slaPausedAt) {
         deadline = new Date(
             new Date(deadline).getTime() + Date.now() - new Date(result.slaPausedAt).getTime()
@@ -50,8 +53,6 @@ export const getAllTickets = async (req, res) => {
         const filter = {};
         if (req.userRole === 'customer') {
             filter.creator = req.userId;
-        } else if (req.userRole === 'agent') {
-            filter.assignee = req.userId;
         } else if (req.query.assignee) {
             if (!mongoose.isValidObjectId(req.query.assignee)) {
                 return res.status(400).json({ message: 'Invalid assignee ID' });
@@ -176,6 +177,9 @@ export const deleteTicketImage = async (req, res) => {
         if (!imageKey) {
             return res.status(404).json({ message: 'Ticket image not found' });
         }
+        if (ticket.status === 'closed') {
+            return res.status(409).json({ message: 'Attachments cannot be changed on a closed ticket' });
+        }
 
         const remainingFileNames = ticket.fileName.filter((_, index) => index !== imageIndex);
         const updatedTicket = await Ticket.updateWithAudit(
@@ -268,17 +272,33 @@ export const updateTicket = async (req, res) => {
                 .filter((field) => Object.hasOwn(req.body, field))
                 .map((field) => [field, req.body[field]])
         );
+        const files = Array.isArray(req.files) ? req.files : [];
         let assignedUser;
+
+        if (ticket.status === 'closed' && files.length > 0) {
+            return res.status(409).json({ message: 'Attachments cannot be added to a closed ticket' });
+        }
 
         if (req.userRole === 'customer') {
             const fields = Object.keys(changes);
-            if (fields.length !== 1 || fields[0] !== 'status' ||
-                !['closed', 'reopened'].includes(changes.status) ||
-                ticket.status !== 'resolved') {
-                return res.status(403).json({ message: 'Customers may only close or reopen their resolved tickets' });
+            const isWaitingOnCustomer = ticket.status === 'waiting_on_customer';
+            const isResolvedStatusChange = ticket.status === 'resolved' &&
+                fields.length === 1 && fields[0] === 'status' &&
+                ['closed', 'reopened'].includes(changes.status);
+            const isWaitingUpdate = isWaitingOnCustomer &&
+                fields.every((field) => field === 'status') &&
+                (!Object.hasOwn(changes, 'status') || changes.status === 'in_progress') &&
+                !Object.hasOwn(req.body, 'fileOrder');
+            if (!isResolvedStatusChange && !isWaitingUpdate) {
+                return res.status(403).json({
+                    message: 'Customers may only respond to waiting tickets or close/reopen their resolved tickets',
+                });
+            }
+            if (!isWaitingOnCustomer && files.length > 0) {
+                return res.status(403).json({ message: 'Customers may upload files only while a ticket is waiting on them' });
             }
         } else {
-            if (changes.assignee) {
+            if (Object.hasOwn(changes, 'assignee') && changes.assignee !== null) {
                 if (!mongoose.isValidObjectId(changes.assignee)) {
                     return res.status(400).json({ message: 'Invalid assignee ID' });
                 }
@@ -291,24 +311,32 @@ export const updateTicket = async (req, res) => {
                     return res.status(400).json({ message: 'Assignee must be an active agent or admin' });
                 }
             }
-            if (req.userRole === 'agent' && changes.assignee &&
-                changes.assignee.toString() !== req.userId) {
+            if (req.userRole === 'agent' && Object.hasOwn(changes, 'assignee') &&
+                String(changes.assignee ?? '') !== req.userId) {
                 return res.status(403).json({ message: 'Agents may only assign tickets to themselves' });
             }
         }
 
-        if (changes.status && changes.status !== ticket.status &&
-            !getAllowedNextStatuses(ticket, { id: req.userId, role: req.userRole })
+        if (changes.status && changes.status !== ticket.status) {
+            if (!STATUS_TRANSITIONS[ticket.status]?.includes(changes.status)) {
+                return res.status(422).json({
+                    message: `Invalid status transition: ${ticket.status} -> ${changes.status}`,
+                    code: 'INVALID_STATUS_TRANSITION',
+                });
+            }
+            if (!getAllowedNextStatuses(ticket, { id: req.userId, role: req.userRole })
                 .includes(changes.status)) {
-            return res.status(403).json({ message: 'You are not allowed to perform this status transition' });
+                return res.status(403).json({ message: 'You are not allowed to perform this status transition' });
+            }
         }
 
-        const files = Array.isArray(req.files) ? req.files : [];
         for (const file of files) {
             uploadedFileNames.push(await postImage(file));
         }
         const oldFileNames = ticket.fileName ?? [];
-        if (files.length > 0 || Object.hasOwn(req.body, 'fileOrder')) {
+        if (req.userRole === 'customer' && files.length > 0) {
+            changes.fileName = [...oldFileNames, ...uploadedFileNames];
+        } else if (files.length > 0 || Object.hasOwn(req.body, 'fileOrder')) {
             const fileOrder = parseFileList(req.body.fileOrder);
             changes.fileName = fileOrder.length
                 ? buildFileOrder(fileOrder, oldFileNames, uploadedFileNames)

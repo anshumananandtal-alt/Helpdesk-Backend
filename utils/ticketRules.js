@@ -16,8 +16,14 @@ export const getAllowedNextStatuses = (ticket, user) => {
     }
     if (user.role === 'customer') {
         const creatorId = ticket.creator?._id?.toString() ?? ticket.creator?.toString();
-        return creatorId === user.id && ticket.status === 'resolved'
-            ? transitions.filter((status) => status === 'closed' || status === 'reopened')
+        if (creatorId !== user.id) {
+            return [];
+        }
+        if (ticket.status === 'resolved') {
+            return transitions.filter((status) => status === 'closed' || status === 'reopened');
+        }
+        return ticket.status === 'waiting_on_customer'
+            ? transitions.filter((status) => status === 'in_progress')
             : [];
     }
     if (isStaff(user.role)) {

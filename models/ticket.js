@@ -1,9 +1,9 @@
 import mongoose from "mongoose";
 import AuditTrail from "./auditTrail.js";
 import { STATUS_TRANSITIONS } from "../utils/ticketRules.js";
+import { calculateSlaDeadline, getTicketSlaDeadline } from "../utils/sla.js";
 
 const auditableFields = ['status', 'assignee', 'priority'];
-const SLA_HOURS = { urgent: 4, high: 8, medium: 24, low: 72 };
 
 const ticketSchema = new mongoose.Schema({
     title: {
@@ -72,8 +72,7 @@ ticketSchema.index({ title: 'text' });
 
 ticketSchema.pre('validate', function () {
     if (!this.slaDeadline && !this.slaDueAt && this.isNew) {
-        const hours = SLA_HOURS[this.priority] ?? SLA_HOURS.low;
-        this.slaDeadline = new Date(Date.now() + hours * 60 * 60 * 1000);
+        this.slaDeadline = calculateSlaDeadline(this.priority);
         this.slaDueAt = this.slaDeadline;
     } else if (this.slaDueAt && !this.slaDeadline) {
         this.slaDeadline = this.slaDueAt;
@@ -146,12 +145,15 @@ ticketSchema.statics.updateWithAudit = async function (
     }
     if (ticket.status === 'waiting_on_customer' &&
         definedChanges.status && definedChanges.status !== 'waiting_on_customer') {
-        const pausedAt = ticket.slaPausedAt ?? now;
-        const extendedDeadline = new Date(
-            (ticket.slaDueAt ?? ticket.slaDeadline).getTime() + now.getTime() - pausedAt.getTime()
-        );
-        update.$set.slaDueAt = extendedDeadline;
-        update.$set.slaDeadline = extendedDeadline;
+        const deadline = getTicketSlaDeadline(ticket);
+        if (deadline) {
+            const pausedAt = ticket.slaPausedAt ?? ticket.updatedAt ?? now;
+            const extendedDeadline = new Date(
+                deadline.getTime() + now.getTime() - new Date(pausedAt).getTime()
+            );
+            update.$set.slaDueAt = extendedDeadline;
+            update.$set.slaDeadline = extendedDeadline;
+        }
         update.$unset = { slaPausedAt: 1 };
     }
     if (definedChanges.status === 'resolved') {

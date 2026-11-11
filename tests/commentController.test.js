@@ -51,6 +51,37 @@ describe('comment controller', () => {
         expect(denied.statusCode).toBe(403);
     });
 
+    test('rejects adding or changing comments and notes on closed tickets', async () => {
+        const ticket = await makeTicket({ status: 'closed' });
+        const existingComment = await Comment.create({
+            ticket: ticket._id,
+            author: users.customer._id,
+            text: 'Final customer reply',
+        });
+
+        const publicResponse = makeResponse();
+        await createComment(makeUserRequest(users.customer, {
+            params: { ticketId: ticket._id.toString() },
+            body: { text: 'Another reply' },
+        }), publicResponse);
+        expect(publicResponse.statusCode).toBe(409);
+
+        const internalResponse = makeResponse();
+        await createComment(makeUserRequest(users.agent, {
+            params: { ticketId: ticket._id.toString() },
+            body: { text: 'Another note', isInternal: true },
+        }), internalResponse);
+        expect(internalResponse.statusCode).toBe(409);
+
+        const updateResponse = makeResponse();
+        await updateComment(makeUserRequest(users.customer, {
+            params: { ticketId: ticket._id.toString(), commentId: existingComment._id.toString() },
+            body: { text: 'Changed after closing' },
+        }), updateResponse);
+        expect(updateResponse.statusCode).toBe(409);
+        expect(await Comment.countDocuments({ ticket: ticket._id })).toBe(1);
+    });
+
     test('hides internal notes from customers and lists notes for assigned agents', async () => {
         const ticket = await makeTicket({ assignee: users.agent._id });
         await Comment.create([

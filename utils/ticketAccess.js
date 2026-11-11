@@ -6,11 +6,8 @@ const idString = (value) => {
 };
 
 export const canAccessTicket = (ticket, user) => {
-    if (user.role === 'admin') {
+    if (user.role === 'admin' || user.role === 'agent') {
         return true;
-    }
-    if (user.role === 'agent') {
-        return idString(ticket.assignee) === user.id;
     }
     if (user.role === 'customer') {
         return idString(ticket.creator) === user.id;

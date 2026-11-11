@@ -23,6 +23,9 @@ export const createComment = async (req, res) => {
         if (!ticket) {
             return res.status(404).json({ message: 'Ticket not found' });
         }
+        if (ticket.status === 'closed') {
+            return res.status(409).json({ message: 'Comments and notes cannot be added to a closed ticket' });
+        }
         if (typeof req.body.text !== 'string' || !req.body.text.trim()) {
             return res.status(400).json({ message: 'Comment text is required' });
         }
@@ -79,6 +82,9 @@ const updateOrDeleteComment = async (req, res, operation) => {
         const ticket = await getAccessibleTicket(req.params.ticketId, req);
         if (!ticket) {
             return res.status(404).json({ message: 'Ticket not found' });
+        }
+        if (ticket.status === 'closed') {
+            return res.status(409).json({ message: 'Comments and notes cannot be changed on a closed ticket' });
         }
         if (!mongoose.isValidObjectId(req.params.commentId)) {
             return res.status(404).json({ message: 'Comment not found' });
