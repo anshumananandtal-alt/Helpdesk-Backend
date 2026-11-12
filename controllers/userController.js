@@ -30,9 +30,26 @@ const handleUserError = (res, error, operation) => {
 };
 
 export const getUsers = async (req, res) => {
+    const page = Number.parseInt(req.query.page, 10) || 1;
+    const limit = Number.parseInt(req.query.limit, 10) || 20;
+    if (page < 1 || limit < 1 || limit > 100) {
+        return res.status(400).json({ message: 'page must be positive and limit must be between 1 and 100' });
+    }
     try {
-        const users = await User.find().select(publicUserFields).sort({ createdAt: -1 });
-        res.json(users);
+        const totalUsers = await User.countDocuments();
+        const users = await User.find()
+        .select(publicUserFields)
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .sort({ createdAt: -1 });
+        res.json({
+            users,
+            page,
+            limit,
+            total: totalUsers,
+            totalPages: Math.ceil(totalUsers / limit),
+        
+        });
     } catch (error) {
         handleUserError(res, error, 'fetching users');
     }
