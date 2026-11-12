@@ -4,12 +4,14 @@ import {
     getUsers,
     updateUser,
     deleteUser,
+    getAgents
 } from '../controllers/userController.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 
 const router = Router();
 
 router.get('/', requireAuth, requireRole('admin'), getUsers);
+router.get('/agents', requireAuth, requireRole('admin'), getAgents);
 router.get('/:id', requireAuth, getUser);
 router.patch('/:id', requireAuth, requireRole('admin'), updateUser);
 router.put('/:id', requireAuth, requireRole('admin'), updateUser);

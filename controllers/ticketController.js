@@ -77,7 +77,6 @@ export const getAllTickets = async (req, res) => {
             const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             filter.$or = [
                 { title: { $regex: escapedSearch, $options: 'i' } },
-                { description: { $regex: escapedSearch, $options: 'i' } },
             ];
         }
         if (req.query.breached !== undefined) {

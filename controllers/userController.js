@@ -55,6 +55,16 @@ export const getUsers = async (req, res) => {
     }
 };
 
+export const getAgents = async (req, res) => {
+    try {
+        const users = await User.find({ role: 'agent' })
+        .sort({ createdAt: -1 });
+        res.json(users);
+    } catch (error) {
+        handleUserError(res, error, 'fetching agent users');
+    }
+};
+
 export const getUser = async (req, res) => {
     try {
         if (!mongoose.isValidObjectId(req.params.id)) {
