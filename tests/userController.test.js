@@ -6,6 +6,7 @@ import emailService from '../utils/emailService.js';
 import {
     createUser,
     deleteUser,
+    getAgents,
     getUser,
     getUsers,
     loginUser,
@@ -21,12 +22,39 @@ import {
 const users = setupTestDatabase();
 
 describe('user controller', () => {
-    test('lists users without exposing password fields', async () => {
+    test('lists users with pagination metadata without exposing password fields', async () => {
         const response = makeResponse();
 
-        await getUsers(makeRequest(), response);
+        await getUsers(makeRequest({ query: { page: '2', limit: '2' } }), response);
 
-        expect(response.body).toHaveLength(3);
+        expect(response.statusCode).toBe(200);
+        expect(response.body).toEqual(expect.objectContaining({
+            page: 2,
+            limit: 2,
+            total: 3,
+            totalPages: 2,
+        }));
+        expect(response.body.users).toHaveLength(1);
+        expect(response.body.users[0].password).toBeUndefined();
+    });
+
+    test('rejects invalid pagination values', async () => {
+        const response = makeResponse();
+
+        await getUsers(makeRequest({ query: { page: '0', limit: '101' } }), response);
+
+        expect(response.statusCode).toBe(400);
+        expect(response.body.message).toMatch(/page must be positive/);
+    });
+
+    test('lists agent users', async () => {
+        const response = makeResponse();
+
+        await getAgents(makeRequest(), response);
+
+        expect(response.statusCode).toBe(200);
+        expect(response.body).toHaveLength(1);
+        expect(response.body[0].role).toBe('agent');
         expect(response.body[0].password).toBeUndefined();
     });
 
@@ -71,32 +99,86 @@ describe('user controller', () => {
         const response = makeResponse();
 
         await createUser(makeRequest({
-            body: { name: 'New', email: 'bad', password: 'short' },
+            body: { name: '   ', email: 'bad', password: 'short' },
         }), response);
 
         expect(response.statusCode).toBe(400);
     });
 
-    test('updates a user role and rejects invalid role values', async () => {
+    test('rejects duplicate registration email addresses', async () => {
+        const response = makeResponse();
+
+        await createUser(makeRequest({
+            body: { name: 'Duplicate', email: users.customer.email, password: 'long-password' },
+        }), response);
+
+        expect(response.statusCode).toBe(409);
+    });
+
+    test('updates user role and active status and rejects invalid updates', async () => {
         const response = makeResponse();
 
         await updateUser(makeUserRequest(users.admin, {
             params: { id: users.customer._id.toString() },
-            body: { role: 'agent' },
+            body: { role: 'agent', isActive: false },
         }), response);
         expect(response.statusCode).toBe(200);
         expect(response.body.role).toBe('agent');
+        expect(response.body.isActive).toBe(false);
 
         const invalid = makeResponse();
-        await updateUser(makeRequest({
-            userId: users.admin._id.toString(),
+        await updateUser(makeUserRequest(users.admin, {
             params: { id: users.customer._id.toString() },
             body: { role: 'support' },
         }), invalid);
         expect(invalid.statusCode).toBe(400);
+
+        const invalidActiveStatus = makeResponse();
+        await updateUser(makeUserRequest(users.admin, {
+            params: { id: users.customer._id.toString() },
+            body: { isActive: 'false' },
+        }), invalidActiveStatus);
+        expect(invalidActiveStatus.statusCode).toBe(400);
+
+        const emptyUpdate = makeResponse();
+        await updateUser(makeUserRequest(users.admin, {
+            params: { id: users.customer._id.toString() },
+            body: { name: 'Changed name' },
+        }), emptyUpdate);
+        expect(emptyUpdate.statusCode).toBe(400);
     });
 
-    test('deletes a user', async () => {
+    test('prevents an administrator from removing their own access or the last active admin', async () => {
+        const selfUpdate = makeResponse();
+
+        await updateUser(makeUserRequest(users.admin, {
+            params: { id: users.admin._id.toString() },
+            body: { isActive: false },
+        }), selfUpdate);
+        expect(selfUpdate.statusCode).toBe(403);
+
+        const lastAdminUpdate = makeResponse();
+        await updateUser(makeUserRequest(users.agent, {
+            params: { id: users.admin._id.toString() },
+            body: { role: 'customer' },
+        }), lastAdminUpdate);
+        expect(lastAdminUpdate.statusCode).toBe(409);
+
+        const lastAdminDelete = makeResponse();
+        await deleteUser(makeUserRequest(users.agent, {
+            params: { id: users.admin._id.toString() },
+        }), lastAdminDelete);
+        expect(lastAdminDelete.statusCode).toBe(409);
+    });
+
+    test('prevents self-deletion and deletes another user', async () => {
+        const selfDelete = makeResponse();
+
+        await deleteUser(makeUserRequest(users.admin, {
+            params: { id: users.admin._id.toString() },
+        }), selfDelete);
+        expect(selfDelete.statusCode).toBe(403);
+
         const response = makeResponse();
 
         await deleteUser(makeUserRequest(users.admin, {
@@ -107,7 +189,7 @@ describe('user controller', () => {
         expect(await User.findById(users.customer._id)).toBeNull();
     });
 
-    test('logs in an active user and rejects invalid credentials', async () => {
+    test('logs in an active user, rejects invalid credentials, and blocks deactivated users', async () => {
         const password = 'correct-password';
         await User.updateOne(
             { _id: users.customer._id },
@@ -127,5 +209,12 @@ describe('user controller', () => {
             body: { email: users.customer.email, password: 'wrong-password' },
         }), invalid);
         expect(invalid.statusCode).toBe(401);
+
+        await User.updateOne({ _id: users.customer._id }, { isActive: false });
+        const inactive = makeResponse();
+        await loginUser(makeRequest({
+            body: { email: users.customer.email, password },
+        }), inactive);
+        expect(inactive.statusCode).toBe(403);
     });
 });
