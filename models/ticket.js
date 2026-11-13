@@ -66,6 +66,10 @@ const ticketSchema = new mongoose.Schema({
         type: Number,
         default: 1  
     },  
+    closedAt: {
+        type: Date,
+        select: false,
+    }
 }, { timestamps: true });
 
 ticketSchema.index({ title: 'text' });

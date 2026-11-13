@@ -10,6 +10,7 @@ import { getDashboard } from './controllers/adminController.js';
 import { requireAdmin } from './middleware/auth.js';
 import rateLimiter from './utils/rateLimiter.js';
 import { errorHandler, notFoundHandler } from './controllers/errorController.js';
+import { startAutoCloseJob } from './jobs/autoCloseTicket.js';
 
 const app = express();
 
@@ -44,6 +45,7 @@ const startServer = async () => {
         }
         await connectDB();
         app.listen(process.env.PORT || 8080, () => {
+            if (process.env.NODE_ENV !== 'test') startAutoCloseJob();
             console.log(`Server is running on port ${process.env.PORT || 8080}`);
         });
     } catch (error) {
