@@ -48,6 +48,7 @@ export const getClosedTicketsToCustomer = async (req, res) => {
         const tickets = await Ticket.find({
             creator: req.userId,
             status: 'closed',
+            relatedTo: null
         })
             .select('+slaDueAt +slaPausedAt')
             .populate('creator', 'name email')
