@@ -244,7 +244,11 @@ export const createTicket = async (req, res) => {
             if (!mongoose.isValidObjectId(relatedTo)) {
                 return res.status(400).json({ message: 'Invalid related ticket ID' });
             }
+            const isTicketAlreadyRelated = await Ticket.findOne({ relatedTo: relatedTo });
             const relatedTicket = await Ticket.findById(relatedTo).select('_id');
+            if( isTicketAlreadyRelated) {
+                return res.status(409).json({ message: 'This ticket is already related to another ticket' });
+            }
             if (!relatedTicket) {
                 return res.status(404).json({ message: 'Related ticket not found' });
             }
