@@ -36,10 +36,30 @@ const getTicketForUser = async (id, req) => {
     const ticket = await Ticket.findById(id)
         .select('+slaDueAt +slaPausedAt')
         .populate('creator', 'name email')
-        .populate('assignee', 'name email');
+        .populate('assignee', 'name email')
+        .populate('relatedTo');
     return ticket && canAccessTicket(ticket, { id: req.userId, role: req.userRole })
         ? ticket
         : null;
+};
+
+export const getClosedTicketsToCustomer = async (req, res) => {
+    try {
+        const tickets = await Ticket.find({
+            creator: req.userId,
+            status: 'closed',
+        })
+            .select('+slaDueAt +slaPausedAt')
+            .populate('creator', 'name email')
+            .populate('assignee', 'name email')
+            .populate('relatedTo')
+            .sort({ updatedAt: -1 });
+        res.json(tickets.map(addSlaState));
+    }
+    catch (error) {
+        console.error('Error fetching closed tickets:', error);
+        res.status(500).json({ message: 'Error fetching closed tickets' });
+    }
 };
 
 export const getAllTickets = async (req, res) => {
@@ -95,6 +115,7 @@ export const getAllTickets = async (req, res) => {
                 .select('+slaDueAt +slaPausedAt')
                 .populate('creator', 'name email')
                 .populate('assignee', 'name email')
+                .populate('relatedTo')
                 .sort({ updatedAt: -1 })
                 .skip((page - 1) * limit)
                 .limit(limit),
@@ -218,12 +239,24 @@ export const createTicket = async (req, res) => {
         for (const file of files) {
             uploadedFileNames.push(await postImage(file));
         }
+        const relatedTo = req.body.relatedTo;
+        if (relatedTo !== undefined && relatedTo !== null && relatedTo !== '') {
+            if (!mongoose.isValidObjectId(relatedTo)) {
+                return res.status(400).json({ message: 'Invalid related ticket ID' });
+            }
+            const relatedTicket = await Ticket.findById(relatedTo).select('_id');
+            if (!relatedTicket) {
+                return res.status(404).json({ message: 'Related ticket not found' });
+            }
+        }
+
         const ticket = new Ticket({
             title: req.body.title,
             description: req.body.description,
             category: req.body.category,
             priority: req.body.priority,
             creator: req.userId,
+            relatedTo: relatedTo || undefined,
             fileName: uploadedFileNames,
         });
         await ticket.save();
@@ -265,12 +298,27 @@ export const updateTicket = async (req, res) => {
             return res.status(403).json({ message: 'Access denied' });
         }
 
-        const requestedFields = ['title', 'description', 'category', 'priority', 'status', 'assignee'];
+        const requestedFields = ['title', 'description', 'category', 'priority', 'status', 'assignee', 'relatedTo'];
         const changes = Object.fromEntries(
             requestedFields
                 .filter((field) => Object.hasOwn(req.body, field))
                 .map((field) => [field, req.body[field]])
         );
+        if (Object.hasOwn(changes, 'relatedTo')) {
+            const relatedTo = changes.relatedTo;
+            if (relatedTo === null || relatedTo === '' || relatedTo === undefined) {
+                changes.relatedTo = null;
+            } else {
+                if (!mongoose.isValidObjectId(relatedTo)) {
+                    return res.status(400).json({ message: 'Invalid related ticket ID' });
+                }
+                const relatedTicket = await Ticket.findById(relatedTo).select('_id');
+                if (!relatedTicket) {
+                    return res.status(404).json({ message: 'Related ticket not found' });
+                }
+                changes.relatedTo = relatedTo;
+            }
+        }
         const files = Array.isArray(req.files) ? req.files : [];
         let assignedUser;
 
@@ -365,7 +413,8 @@ export const updateTicket = async (req, res) => {
         const populatedTicket = await Ticket.findById(updatedTicket._id)
             .select('+slaDueAt +slaPausedAt')
             .populate('creator', 'name email')
-            .populate('assignee', 'name email');
+            .populate('assignee', 'name email')
+            .populate('relatedTo');
         res.json(addSlaState(populatedTicket));
     } catch (error) {
         if (!updateSucceeded && uploadedFileNames.length > 0) {

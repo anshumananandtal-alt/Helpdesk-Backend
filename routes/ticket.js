@@ -9,6 +9,7 @@ import {
     updateTicket,
     deleteTicket,
     getTicketAudit,
+    getClosedTicketsToCustomer,
 } from '../controllers/ticketController.js';
 import {
     createComment,
@@ -35,6 +36,7 @@ const uploadImages = multer({
 router.use(requireAuth);
 router.use(uploadImages);
 router.get('/', getAllTickets);
+router.get('/closed', getClosedTicketsToCustomer);
 router.post('/', addEditTicket(), createTicket);
 router.get('/:id/images/:imageIndex', getTicketImage);
 router.delete('/:id/images/:imageIndex', deleteTicketImage);

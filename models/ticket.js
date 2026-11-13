@@ -37,6 +37,10 @@ const ticketSchema = new mongoose.Schema({
         ref: 'User',
         required: true  
     },
+    relatedTo: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Ticket'
+    },
     assignee: {
         type: mongoose.Schema.Types.ObjectId,       
         ref: 'User'

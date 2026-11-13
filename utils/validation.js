@@ -59,6 +59,11 @@ export const addEditTicket = () => {
         .trim(),
         body('category', 'Please select a valid category')
         .isString()
-        .notEmpty()
+        .notEmpty(),
+        body('relatedTo')
+        .optional({ nullable: true })
+        .isMongoId()
+        .withMessage('Please provide a valid related ticket ID')
+        .trim()
     ] 
 }
