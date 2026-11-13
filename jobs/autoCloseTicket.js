@@ -43,7 +43,7 @@ export async function autoCloseResolvedTickets() {
     closed++;
   }
 
-  console.log(`[auto-close] closed ${closed} of ${tickets.length} candidates`);
+  console.log(`[auto-close] closed ${closed} of ${tickets.length} tickets`);
 }
 
 export function startAutoCloseJob() {
